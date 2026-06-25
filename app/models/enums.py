@@ -36,3 +36,17 @@ class DutyType(str, enum.Enum):
     divisional_meeting = "divisional_meeting"
     parade = "parade"
     training = "training"
+
+class UnitStatus(str, enum.Enum):
+    active = "active"
+    inactive = "inactive"
+    suspended = "suspended"
+
+class AwardCategory(str, enum.Enum):
+    meritorious = "meritorious"
+    bravery = "bravery"
+    service = "service"
+    donation = "donation"
+    program = "program"
+    state_honour = "state_honour"
+    divisional = "divisional"

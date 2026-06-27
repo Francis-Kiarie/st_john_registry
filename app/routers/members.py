@@ -5,6 +5,11 @@ from uuid import UUID
 from datetime import date
 from typing import List
 
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from app.utils.photos import save_member_photo, delete_member_photo
+from app.models.user import User
+from app.utils.auth import require_secretary_or_above, assert_division_access
+
 from app.database import get_db
 from app.models.member import (
     Member, DutyLog, EfficiencyRecord, StatusHistory, RankAppointment
@@ -232,3 +237,47 @@ def assess_efficiency(member_id: UUID, assess: EfficiencyAssess, db: Session = D
     db.commit()
     db.refresh(record)
     return record
+
+# ── Photo upload ──────────────────────────────────────────────────────────────
+
+@router.post("/{member_id}/photo", response_model=MemberResponse)
+async def upload_photo(
+    member_id: UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_secretary_or_above)
+):
+    member = get_or_404(db, member_id)
+
+    # Enforce division scope
+    assert_division_access(current_user, member.division_id)
+
+    # Delete old photo if one exists
+    if member.photo_url:
+        delete_member_photo(member.photo_url)
+
+    # Save new photo
+    photo_url = await save_member_photo(file, str(member_id))
+    member.photo_url = photo_url
+
+    db.commit()
+    db.refresh(member)
+    return member
+
+
+@router.delete("/{member_id}/photo", response_model=MemberResponse)
+def delete_photo(
+    member_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_secretary_or_above)
+):
+    member = get_or_404(db, member_id)
+    assert_division_access(current_user, member.division_id)
+
+    if member.photo_url:
+        delete_member_photo(member.photo_url)
+        member.photo_url = None
+        db.commit()
+        db.refresh(member)
+
+    return member

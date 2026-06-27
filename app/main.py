@@ -1,5 +1,9 @@
 from fastapi import FastAPI
-from .routers import corps, divisions, members
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+
+from app.routers import corps, divisions, members
+from app.routers import auth
 
 app = FastAPI(
     title="St. John Kenya – Member Registry",
@@ -7,6 +11,11 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Serve uploaded photos as static files
+Path("uploads/members").mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+app.include_router(auth.router)
 app.include_router(corps.router)
 app.include_router(divisions.router)
 app.include_router(members.router)

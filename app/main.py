@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBearer
 from pathlib import Path
+from app.routers import corps, divisions, members, auth
 
-from app.routers import corps, divisions, members
-from app.routers import auth
+
+bearer_scheme = HTTPBearer()
 
 app = FastAPI(
     title="St. John Kenya – Member Registry",

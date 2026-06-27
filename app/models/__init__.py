@@ -8,3 +8,4 @@ from .enums import (
     UnitStatus, DivisionType, MemberRank,
     SpecialistTrack, MemberStatus, DutyType, AwardCategory
 )
+from .user import User, UserRole

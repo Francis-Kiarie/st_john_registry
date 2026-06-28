@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer
 from pathlib import Path
+from fastapi.middleware.cors import CORSMiddleware
 from app.routers import corps, divisions, members, auth, reports
 
 
@@ -11,6 +12,14 @@ app = FastAPI(
     title="St. John Kenya – Member Registry",
     description="Corp and Division member registration and tracking system",
     version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Serve uploaded photos as static files

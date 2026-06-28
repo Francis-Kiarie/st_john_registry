@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import extract
+from sqlalchemy import extract, or_
 from uuid import UUID
 from datetime import date
 from typing import List
@@ -8,19 +8,19 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from app.utils.photos import save_member_photo, delete_member_photo
 from app.models.user import User
-from app.utils.auth import require_secretary_or_above, assert_division_access
+from app.utils.auth import require_secretary_or_above, require_superintendent_or_above, require_any_authenticated, assert_division_access
 
 from app.database import get_db
 from app.models.member import (
     Member, DutyLog, EfficiencyRecord, StatusHistory, RankAppointment
 )
 from app.models.division import Division
-from app.models.enums import DutyType, MemberRank
+from app.models.enums import DutyType, MemberRank, SpecialistTrack
 from app.schemas.member import (
     MemberCreate, MemberUpdate, MemberResponse,
     DutyLogCreate, DutyLogResponse,
     EfficiencyRecordResponse, EfficiencyAssess,
-    StatusChange
+    StatusChange, RankPromotion, RankAppointmentResponse
 )
 from app.utils.membership import generate_membership_number
 
@@ -143,6 +143,65 @@ def update_member(member_id: UUID, member_in: MemberUpdate, db: Session = Depend
     db.refresh(member)
     return member
 
+# ── Search ────────────────────────────────────────────────────────────────────
+
+@router.get("/search", response_model=List[MemberResponse])
+def search_members(
+    q: str,                                 # search term
+    corp_id: UUID | None = None,            # narrow to a corp
+    division_id: UUID | None = None,        # narrow to a division
+    status: str | None = None,              # filter by status
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_authenticated)
+):
+    """
+    Search members by:
+    - Full name (partial, case-insensitive)
+    - ID number (exact or partial)
+    - Membership number (exact or partial)
+    - Phone number (partial)
+
+    Scope is automatically enforced:
+    - Corp admin sees all members in their corp
+    - Division roles see only their division
+    """
+    if len(q.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Search term must be at least 2 characters")
+
+    query = db.query(Member).join(Division)
+
+    # Enforce scope based on user role
+    from app.models.user import UserRole
+    if current_user.role == UserRole.corp_admin:
+        query = query.filter(Division.corp_id == current_user.corp_id)
+    else:
+        query = query.filter(Member.division_id == current_user.division_id)
+
+    # Apply additional filters if provided
+    if corp_id:
+        query = query.filter(Division.corp_id == corp_id)
+    if division_id:
+        query = query.filter(Member.division_id == division_id)
+    if status:
+        query = query.filter(Member.status == status)
+
+    # Search across four fields
+    search_term = f"%{q.strip()}%"
+    query = query.filter(
+        or_(
+            Member.full_name.ilike(search_term),
+            Member.id_number.ilike(search_term),
+            Member.membership_number.ilike(search_term),
+            Member.phone.ilike(search_term),
+        )
+    )
+
+    results = query.order_by(Member.full_name).limit(50).all()
+
+    if not results:
+        raise HTTPException(status_code=404, detail="No members found matching your search")
+
+    return results
 
 # ── Status changes ────────────────────────────────────────────────────────────
 
@@ -281,3 +340,102 @@ def delete_photo(
         db.refresh(member)
 
     return member
+
+# ── Rank promotion ────────────────────────────────────────────────────────────
+
+# BGR rank ladder — promotion must follow this order
+RANK_LADDER = [
+    MemberRank.member,
+    MemberRank.corporal,
+    MemberRank.sergeant,
+    MemberRank.acting_div_officer,
+    MemberRank.div_officer,
+    MemberRank.div_superintendent,
+]
+
+@router.post("/{member_id}/rank", response_model=RankAppointmentResponse)
+def promote_member(
+    member_id: UUID,
+    promotion: RankPromotion,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superintendent_or_above)
+):
+    """
+    Promotes a member to a new rank.
+    - Validates promotion follows the BGR ladder (no skipping ranks)
+    - Closes the current rank appointment
+    - Opens a new rank appointment
+    - Updates member.current_rank
+    """
+    member = get_or_404(db, member_id)
+    assert_division_access(current_user, member.division_id)
+
+    # Validate the promotion follows the ladder
+    current_index = RANK_LADDER.index(member.current_rank)
+    new_index = RANK_LADDER.index(promotion.new_rank)
+
+    if new_index <= current_index:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot promote to {promotion.new_rank}. "
+                f"Member is already at {member.current_rank}. "
+                f"Next valid rank is {RANK_LADDER[current_index + 1] if current_index + 1 < len(RANK_LADDER) else 'none — already at highest rank'}."
+            )
+        )
+
+    if new_index > current_index + 1:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot skip ranks. "
+                f"Member must be promoted to "
+                f"{RANK_LADDER[current_index + 1]} before {promotion.new_rank}."
+            )
+        )
+
+    # Close current rank appointment
+    current_appointment = db.query(RankAppointment).filter(
+        RankAppointment.member_id == member_id,
+        RankAppointment.is_current == True
+    ).first()
+
+    if current_appointment:
+        current_appointment.is_current = False
+        current_appointment.vacated_date = promotion.appointed_date
+
+    # Create new rank appointment
+    new_appointment = RankAppointment(
+        member_id=member.id,
+        rank=promotion.new_rank,
+        specialist_rank=promotion.specialist_rank,
+        appointed_date=promotion.appointed_date,
+        appointed_by=promotion.appointed_by,
+        authorization_ref=promotion.authorization_ref,
+        is_current=True
+    )
+    db.add(new_appointment)
+
+    # Update member's current rank
+    member.current_rank = promotion.new_rank
+    if promotion.specialist_rank != SpecialistTrack.none:
+        member.specialist_track = promotion.specialist_track
+
+    db.commit()
+    db.refresh(new_appointment)
+    return new_appointment
+
+
+@router.get("/{member_id}/rank/history", response_model=List[RankAppointmentResponse])
+def get_rank_history(
+    member_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_authenticated)
+):
+    get_or_404(db, member_id)
+    return (
+        db.query(RankAppointment)
+        .filter(RankAppointment.member_id == member_id)
+        .order_by(RankAppointment.appointed_date.desc())
+        .all()
+    )

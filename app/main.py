@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer
 from pathlib import Path
-from app.routers import corps, divisions, members, auth
+from app.routers import corps, divisions, members, auth, reports
 
 
 bearer_scheme = HTTPBearer()
@@ -21,6 +21,7 @@ app.include_router(auth.router)
 app.include_router(corps.router)
 app.include_router(divisions.router)
 app.include_router(members.router)
+app.include_router(reports.router)
 
 @app.get("/")
 def root():

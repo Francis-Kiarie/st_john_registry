@@ -6,6 +6,29 @@ from app.models.enums import (
     MemberRank, SpecialistTrack, MemberStatus, DutyType, AwardCategory
 )
 
+
+
+class RankPromotion(BaseModel):
+    new_rank: MemberRank
+    specialist_rank: SpecialistTrack = SpecialistTrack.none
+    appointed_date: date
+    appointed_by: str
+    authorization_ref: Optional[str] = None 
+
+class RankAppointmentResponse(BaseModel):
+    id: UUID
+    member_id: UUID
+    rank: MemberRank
+    specialist_rank: SpecialistTrack
+    appointed_date: date
+    vacated_date: Optional[date] = None
+    appointed_by: str
+    authorization_ref: Optional[str] = None
+    is_current: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 class MemberBase(BaseModel):
     full_name: str
     id_number: str

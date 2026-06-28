@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr, field_validator
 from uuid import UUID
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, List
 from app.models.enums import (
     MemberRank, SpecialistTrack, MemberStatus, DutyType, AwardCategory
 )
@@ -159,3 +159,25 @@ class AwardResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+# --- Status history schema ---
+class StatusHistoryResponse(BaseModel):
+    id: UUID
+    member_id: UUID
+    old_status: MemberStatus
+    new_status: MemberStatus
+    changed_date: date
+    changed_by: str
+    bgr_regulation_ref: Optional[str] = None
+    reason: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+#
+class PaginatedMembers(BaseModel):
+    total: int
+    page: int
+    limit: int
+    pages: int
+    results: List[MemberResponse]

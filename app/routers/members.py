@@ -17,10 +17,10 @@ from app.models.member import (
 from app.models.division import Division
 from app.models.enums import DutyType, MemberRank, SpecialistTrack
 from app.schemas.member import (
-    MemberCreate, MemberUpdate, MemberResponse,
+    MemberCreate, MemberUpdate, MemberResponse,PaginatedMembers,
     DutyLogCreate, DutyLogResponse,
     EfficiencyRecordResponse, EfficiencyAssess,
-    StatusChange, RankPromotion, RankAppointmentResponse,AwardCreate, AwardResponse 
+    StatusChange, RankPromotion, RankAppointmentResponse,AwardCreate, AwardResponse,StatusHistoryResponse
 )
 from app.utils.membership import generate_membership_number
 
@@ -114,34 +114,55 @@ def register_member(member_in: MemberCreate, db: Session = Depends(get_db)):
 
 # ── Member queries ────────────────────────────────────────────────────────────
 
-@router.get("/", response_model=List[MemberResponse])
+
+@router.get("/", response_model=PaginatedMembers)
 def list_members(
     division_id: UUID | None = None,
     corp_id: UUID | None = None,
     status: str | None = None,
-    db: Session = Depends(get_db)
+    page: int = 1,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_authenticated)
 ):
+    if page < 1:
+        raise HTTPException(status_code=400, detail="page must be 1 or greater")
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
+
     query = db.query(Member).join(Division)
+
+    # Scope enforcement
+    from app.models.user import UserRole
+    if current_user.role == UserRole.corp_admin:
+        query = query.filter(Division.corp_id == current_user.corp_id)
+    else:
+        query = query.filter(Member.division_id == current_user.division_id)
+
+    # Optional filters
     if division_id:
         query = query.filter(Member.division_id == division_id)
     if corp_id:
         query = query.filter(Division.corp_id == corp_id)
     if status:
         query = query.filter(Member.status == status)
-    return query.all()
 
-@router.get("/{member_id}", response_model=MemberResponse)
-def get_member(member_id: UUID, db: Session = Depends(get_db)):
-    return get_or_404(db, member_id)
+    total = query.count()
+    members = (
+        query
+        .order_by(Member.full_name)
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
 
-@router.patch("/{member_id}", response_model=MemberResponse)
-def update_member(member_id: UUID, member_in: MemberUpdate, db: Session = Depends(get_db)):
-    member = get_or_404(db, member_id)
-    for field, value in member_in.model_dump(exclude_unset=True).items():
-        setattr(member, field, value)
-    db.commit()
-    db.refresh(member)
-    return member
+    return PaginatedMembers(
+        total=total,
+        page=page,
+        limit=limit,
+        pages=-(-total // limit),
+        results=members
+    )
 
 # ── Search ────────────────────────────────────────────────────────────────────
 
@@ -499,3 +520,24 @@ def delete_award(
 
     db.delete(award)
     db.commit()
+
+# ── Status history ────────────────────────────────────────────────────────────
+
+@router.get("/{member_id}/status/history", response_model=List[StatusHistoryResponse])
+def get_status_history(
+    member_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_authenticated)
+):
+    """
+    Full audit trail of status changes for a member.
+    Every suspension, discharge, transfer, and reinstatement
+    is recorded here with the reason and BGR regulation cited.
+    """
+    get_or_404(db, member_id)
+    return (
+        db.query(StatusHistory)
+        .filter(StatusHistory.member_id == member_id)
+        .order_by(StatusHistory.changed_date.desc())
+        .all()
+    )

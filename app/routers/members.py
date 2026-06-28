@@ -12,7 +12,7 @@ from app.utils.auth import require_secretary_or_above, require_superintendent_or
 
 from app.database import get_db
 from app.models.member import (
-    Member, DutyLog, EfficiencyRecord, StatusHistory, RankAppointment
+    Member, DutyLog, EfficiencyRecord, StatusHistory, RankAppointment, AwardRecord
 )
 from app.models.division import Division
 from app.models.enums import DutyType, MemberRank, SpecialistTrack
@@ -20,7 +20,7 @@ from app.schemas.member import (
     MemberCreate, MemberUpdate, MemberResponse,
     DutyLogCreate, DutyLogResponse,
     EfficiencyRecordResponse, EfficiencyAssess,
-    StatusChange, RankPromotion, RankAppointmentResponse
+    StatusChange, RankPromotion, RankAppointmentResponse,AwardCreate, AwardResponse 
 )
 from app.utils.membership import generate_membership_number
 
@@ -439,3 +439,63 @@ def get_rank_history(
         .order_by(RankAppointment.appointed_date.desc())
         .all()
     )
+
+# ── Awards ────────────────────────────────────────────────────────────────────
+
+@router.post("/{member_id}/awards", response_model=AwardResponse, status_code=201)
+def add_award(
+    member_id: UUID,
+    award_in: AwardCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_secretary_or_above)
+):
+    """
+    Record an award or honour for a member.
+    Categories per BGR page 20: meritorious, bravery, service,
+    donation, program, state_honour, divisional.
+    """
+    member = get_or_404(db, member_id)
+    assert_division_access(current_user, member.division_id)
+
+    award = AwardRecord(member_id=member.id, **award_in.model_dump())
+    db.add(award)
+    db.commit()
+    db.refresh(award)
+    return award
+
+
+@router.get("/{member_id}/awards", response_model=List[AwardResponse])
+def list_awards(
+    member_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_authenticated)
+):
+    get_or_404(db, member_id)
+    return (
+        db.query(AwardRecord)
+        .filter(AwardRecord.member_id == member_id)
+        .order_by(AwardRecord.awarded_date.desc())
+        .all()
+    )
+
+
+@router.delete("/{member_id}/awards/{award_id}", status_code=204)
+def delete_award(
+    member_id: UUID,
+    award_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_superintendent_or_above)
+):
+    """Remove an incorrectly recorded award — superintendent or above only."""
+    member = get_or_404(db, member_id)
+    assert_division_access(current_user, member.division_id)
+
+    award = db.query(AwardRecord).filter(
+        AwardRecord.id == award_id,
+        AwardRecord.member_id == member_id
+    ).first()
+    if not award:
+        raise HTTPException(status_code=404, detail="Award not found")
+
+    db.delete(award)
+    db.commit()

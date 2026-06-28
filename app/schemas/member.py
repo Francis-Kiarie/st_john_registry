@@ -136,3 +136,26 @@ class StatusChange(BaseModel):
     changed_by: str
     bgr_regulation_ref: Optional[str] = None
     reason: str
+
+# --- Award schemas ---
+class AwardCreate(BaseModel):
+    award_name: str
+    award_category: AwardCategory
+    awarded_date: date
+    awarded_by: str
+    certificate_number: Optional[str] = None
+    citation: Optional[str] = None
+
+class AwardResponse(BaseModel):
+    id: UUID
+    member_id: UUID
+    award_name: str
+    award_category: AwardCategory
+    awarded_date: date
+    awarded_by: str
+    certificate_number: Optional[str] = None
+    citation: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

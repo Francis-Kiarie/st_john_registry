@@ -132,14 +132,15 @@ def list_members(
 
     query = db.query(Member).join(Division)
 
-    # Scope enforcement
+    # Scope enforcement — only filter if corp_id exists on the user
     from app.models.user import UserRole
     if current_user.role == UserRole.corp_admin:
-        query = query.filter(Division.corp_id == current_user.corp_id)
+        if current_user.corp_id:   # ← guard added
+            query = query.filter(Division.corp_id == current_user.corp_id)
     else:
-        query = query.filter(Member.division_id == current_user.division_id)
+        if current_user.division_id:   # ← guard added
+            query = query.filter(Member.division_id == current_user.division_id)
 
-    # Optional filters
     if division_id:
         query = query.filter(Member.division_id == division_id)
     if corp_id:
@@ -219,10 +220,19 @@ def search_members(
 
     results = query.order_by(Member.full_name).limit(50).all()
 
-    if not results:
-        raise HTTPException(status_code=404, detail="No members found matching your search")
-
     return results
+
+# ── Member detail ───────────────────────────────────────────────────────────
+
+@router.get("/{member_id}", response_model=MemberResponse)
+def get_member(
+    member_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_authenticated)
+):
+    member = get_or_404(db, member_id)
+    assert_division_access(current_user, member.division_id)
+    return member
 
 # ── Status changes ────────────────────────────────────────────────────────────
 

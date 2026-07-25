@@ -80,6 +80,7 @@ class MemberResponse(MemberBase):
     current_rank: MemberRank
     status: MemberStatus
     created_at: datetime
+    photo_url: Optional[str] = None 
 
     class Config:
         from_attributes = True

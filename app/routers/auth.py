@@ -6,6 +6,7 @@ from app.models.user import User, UserRole
 from app.models.corp import Corp
 from app.models.division import Division
 from app.schemas.auth import UserCreate, UserResponse, TokenResponse, LoginRequest, PasswordChange
+from typing import List
 from app.utils.auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, require_corp_admin
@@ -102,3 +103,11 @@ def deactivate_user(
     db.commit()
     db.refresh(user)
     return user
+
+@router.get("/users", response_model=list[UserResponse])
+def list_users(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_corp_admin)
+):
+    """List all users — corp admin only."""
+    return db.query(User).order_by(User.full_name).all()

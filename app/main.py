@@ -1,10 +1,11 @@
+import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer
-from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import corps, divisions, members, auth, reports
+from pathlib import Path
 
+from app.routers import corps, divisions, members, auth, reports
 
 bearer_scheme = HTTPBearer()
 
@@ -14,17 +15,26 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Read allowed origins from environment variable
+# In production: set via Cloud Run env var
+# In development: defaults to localhost
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:5173,http://localhost:8081"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Serve uploaded photos as static files
-Path("uploads/members").mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# Only mount local static files in development
+if not os.getenv("GCS_BUCKET_NAME"):
+    Path("uploads/members").mkdir(parents=True, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.include_router(auth.router)
 app.include_router(corps.router)
